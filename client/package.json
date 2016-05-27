@@ -1,11 +1,25 @@
 {
   "name": "space-war",
-  "version": "1.0.0",
-  "description": "special",
+  "version": "0.0.1",
+  "description": "",
   "repository": {},
   "author": "lixinliang",
   "license": "MIT",
+  "scripts": {
+    "dev": "webpack-dev-server --hot --inline --quiet --devtool eval --content-base ./src/ --config ./tasks/webpack.dev.js --port 8888 --host 0.0.0.0",
+    "kill": "node ./tasks/webpack.kill.js"
+  },
   "devDependencies": {
+    "webpack": "^1.12.9",
+    "webpack-dev-server": "^1.14.0",
+    "request": "^2.67.0",
+    "gulp-webpack": "^1.5.0",
+    "babel-core": "^6.1.2",
+    "babel-loader": "^6.1.0",
+    "babel-plugin-transform-runtime": "^6.1.2",
+    "babel-preset-es2015": "^6.1.2",
+    "babel-preset-stage-0": "^6.1.2",
+    "babel-runtime": "^5.8.0",
     "yargs": "~1.2.6",
     "chalk": "^0.5.1",
     "glob": "~4.2.1",
@@ -28,6 +42,7 @@
     "gulp-svg-symbols": "^0.3.1",
     "gulp-rename": "~1.2.2",
     "gulp-imagemin": "~2.4.0",
+    "gulp-inline-source": "^2.1.0",
     "imagemin-pngquant": "~4.2.0",
     "gulp-zip": "~0.4.0",
     "gulp-header": "~1.1.1",
@@ -38,6 +53,18 @@
     "jshint-stylish": "~2.0.1",
     "gulp-jsbeautifier": "^1.0.1",
     "map-stream": "0.0.6",
-    "qrcode-terminal": "^0.10.0"
+    "qrcode-terminal": "^0.10.0",
+    "gulp-util": "^3.0.7",
+    "through2": "^2.0.1",
+    "lodash": "^4.6.1",
+    "autoprefixer-loader": "^3.2.0",
+    "css-loader": "^0.23.1",
+    "html-loader": "^0.4.3",
+    "sass-loader": "^3.2.0",
+    "style-loader": "^0.13.1",
+    "raw-loader": "^0.5.1",
+    "tmodjs-loader": "^1.0.1",
+    "url-loader": "^0.5.7",
+    "gulp-cssimport": "^3.0.2"
   }
 }

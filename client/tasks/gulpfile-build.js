@@ -1,27 +1,34 @@
-module.exports = function(gulp, plugins) {
+'use strict';
 
-    var argv = require('yargs').argv,
-        del = require('del'),
-        moment = require('moment'),
-        multiSprite = require('multi-sprite'),
-        browserSync = require('browser-sync'),
-        log = console.log;
+module.exports = (gulp, plugins) => {
 
-    var that = this;
-    that.port = +argv.p || 3000;
-    var isBeautifyHTML = argv.b || false;
-    var pkg = require('../package.json');
-    var banner = '/*!' + '\n * @project : ' + pkg.name + '\n * @version : ' + pkg.version + '\n * @author  : ' + pkg.author + '\n * @update  : ' + moment().format('YYYY-MM-DD h:mm:ss a') + '\n */\r';
+    let argv           = require('yargs').argv,
+        del            = require('del'),
+        moment         = require('moment'),
+        cssImport      = require('gulp-cssimport'),
+        multiSprite    = require('multi-sprite'),
+        browserSync    = require('browser-sync'),
+        log            = console.log,
+        webpack        = require('gulp-webpack'),
+        port           = +argv.p || 3000,
+        isBeautifyHTML = argv.b || false,
+        pkg            = require('../package.json'),
+        banner         = '/*!' + '\n * @project : ' + pkg.name + '\n * @version : ' + pkg.version + '\n * @author : ' + pkg.author + '\n * @update : ' + moment().format('YYYY-MM-DD h:mm:ss a') + '\n */\r',
+        commonJS       = require('./gulp.commonJS.js');
 
-    gulp.task('build_sass', function() {
-        function sassCompile4nix(){
-            function handler(){
+    let _    = require('lodash'),
+        path = require('path');
+
+    // 编译sass任务
+    gulp.task('build_sass', () => {
+        let sassCompile4nix = () => {
+            let handler = () => {
                 return plugins.notify.onError({
-                    title:'sass编译错误', 
+                    title:'sass编译错误',
                     message:'<%=error.message%>'
                 })
             }
-            return plugins.sass().on('error', handler()) 
+            return plugins.sass().on('error', handler())
         }
         return gulp.src('src/sass/*.scss')
             .pipe(plugins.sourcemaps.init())
@@ -30,76 +37,165 @@ module.exports = function(gulp, plugins) {
             .pipe(plugins.sourcemaps.init({loadMaps: true}))
             .pipe(plugins.autoprefixer( {browsers: ['> 0%']} ))
             .pipe(plugins.sourcemaps.write({includeContent: false, sourceRoot: '../sass/'}))
-            .pipe(gulp.dest('src/css'))
+            .pipe(cssImport())
+            .pipe(gulp.dest('src/css'));
     })
-    gulp.task('build_css', ['build_sass'], function() {
+
+    gulp.task('build_css', ['build_sass'], () => {
         return gulp.src('src/css/**/*.css')
             .pipe(plugins.minifyCss({"compatibility":"ie7", "shorthandCompacting": false}))
             .pipe(plugins.header(banner, { pkg : pkg } ))
-            .pipe(gulp.dest('dest/css'))
+            .pipe(gulp.dest('dest/css'));
     })
-    gulp.task('build_slice', function() {
+
+    gulp.task('build_slice', () => {
         return gulp.src('src/img/slice/**')
-            .pipe(gulp.dest('dest/img/slice'))
+            .pipe(gulp.dest('dest/img/slice'));
     })
-    gulp.task('build_sprite', ['build_slice', 'build_css'], function() {
+
+    // 雪碧图任务
+    gulp.task('build_sprite', ['build_slice', 'build_css'], () => {
         return multiSprite({
             rootFontSize: argv.w? +argv.w/16 : 750/16,
-            srcCss: 'dest/css',
-            srcImg: 'dest/img/slice',
-            destCss: 'dest/css',
-            destImg: 'dest/img/sprite',
-            'algorithm': 'binary-tree',
-            'padding': 4,
+            srcCss      : 'dest/css',
+            srcImg      : 'dest/img/slice',
+            destCss     : 'dest/css',
+            destImg     : 'dest/img/sprite',
+            'algorithm' : 'binary-tree',
+            'padding'   : 4,
             'exportOpts': {
                 'format': 'png',
                 'quality': 90
             },
-            successCB: function(){
+            successCB: () => {
                 del(['dest/img/slice/**'])
-                
+
                 // 给css文件的图片请求加上时间戳
-                var timestamp = +new Date
+                let timestamp = +new Date
                 gulp.src(['dest/css/**'])
                     .pipe(plugins.replace(/(\/[\w-]*\.(jpg|jpeg|gif|png|bmp|tiff|otf|ttf|woff|svg|webp|swf|htc))/ig, '$1?'+timestamp))
                     .pipe(gulp.dest('dest/css'));
             }
         })
     })
-    gulp.task('build_jshint', function() {
-        var stylish = require('jshint-stylish')
-        var mapStream = require('map-stream')
-        var myReporter = mapStream(function (file, cb) {
-            if (!file.jshint.success) {
-                file.jshint.results.forEach(function (info) {
-                    if (info.error.code.charAt(0) === 'E') {
-                        console.log('请消除error后再执行 build')
-                        process.exit(1)
-                    }
-                })
-            }
-            cb(null, file)
-        })
-        return gulp.src(['src/js/**/*.js', '!src/js/lib/**'])
-            .pipe(plugins.jshint('.jshintrc'))
-            .pipe(plugins.jshint.reporter(stylish))
-            .pipe(myReporter)
-    })
-    gulp.task('build_js', ['build_jshint'], function() {
-        // @see https://github.com/mishoo/UglifyJS2#compressor-options
-        return gulp.src('src/js/**/*.js')
-            .pipe(plugins.uglify({
-                preserveComments:'some',
-                mangle:false,
-                compress: {
-                    drop_console: true 
+
+    // webpack 任务
+    //
+    // 获取自定义配置
+    let config = require('../config.js').default;
+
+    gulp.task('webpack_js', () => {
+
+        if(config.other){
+            let other = config.other;
+
+            _.forEach(other, function(v){
+                let _config = require(require('path').join(__dirname, '../') + v);
+                if( _config.default &&  _config.default.alias){
+                    config.alias = _.assign( config.alias, _config.default.alias );
                 }
-            }).on('error', console.log))
-            .pipe(plugins.header(banner, { pkg : pkg } ))
+            });
+
+        }
+
+        // 生成entrys
+        require('./webpack.entrys.js').init((entrys) => {
+
+            // ES6 loader
+            let ES6Loader = `
+                {
+                    test: /\.js$/,
+                    exclude: /(node_modules|bower_components)/,
+                    include: path.join(__dirname, '../src/entry/'),
+                    loader: 'babel',
+                    query: {
+                        presets: ['es2015', 'stage-0'],
+                        // plugins: ['transform-runtime'],
+                    }
+                },
+            `;
+
+            // 是否打包出公共模块
+            let packCommonJS = `
+                new webpack.optimize.CommonsChunkPlugin({
+                    name: 'common',
+                    minChunks: 2
+                })
+            `;
+
+            // webpack Dev temp
+            let webpackTpl = `
+                var webpack = require('webpack');
+                var path    = require('path');
+
+                module.exports = {
+                	entry: ${ JSON.stringify(entrys) },
+                	output: {
+                		filename: '[name].js',
+                	},
+                	module: {
+                        loaders: [
+                            ${ config.isES6 ?  ES6Loader : '' }
+                            {
+                                test: /\.html$/,
+                                loader: 'html'
+                            },
+                            {
+                                test: /\.scss$/,
+                                include: path.join(__dirname, '../src/entry/'),
+                                loaders: ['css', 'autoprefixer', 'sass'],
+                            },
+                            {
+                                test: /\.(png|jpg|gif|svg)$/,
+                                loader: 'url?limit=10240&name=/img/[name].[ext]?[hash]'
+                            },
+                            {
+                                test: /\.tpl$/,
+                                exclude: /(node_modules|bower_components)/,
+                                include: path.join(__dirname, '../src/entry/tpl/'),
+                                loader: 'tmodjs',
+                            },
+                        ]
+                	},
+                    resolve: {
+                        alias: ${ JSON.stringify(config.alias) },
+                        extensions:['','.js','.json'],
+                    },
+                	plugins: [
+                        new webpack.ProvidePlugin(${ JSON.stringify(config.global) }),
+                        new webpack.optimize.UglifyJsPlugin({
+                            compress: {
+                                warnings: false
+                            }
+                        }),
+                        ${ config.isPackCommonJS ?  packCommonJS : '' }
+                    ]
+                };
+            `;
+            // console.log(webpackTpl);
+
+            // 写入webpack build 配置文件
+            require('fs').writeFile('./tasks/webpack.build.js', webpackTpl, (err) => {
+                if(err) throw err;
+                return gulp.src('src/entry/**/*.js')
+                    .pipe(webpack(require('./webpack.build.js')))
+                    .pipe(plugins.header(banner, { pkg : pkg } ))
+                    .pipe(gulp.dest('dest/js'))
+
+            });
+        });
+    })
+
+    // JS 任务
+    gulp.task('build_js', ['webpack_js'], () => {
+        return gulp.src('src/js/**/*.js')
+            .pipe(plugins.uglify())
             .pipe(gulp.dest('dest/js'))
     })
-    gulp.task('build_img', function() {
-        var pngquant = require('imagemin-pngquant')
+
+    // img 任务
+    gulp.task('build_img', () => {
+        let pngquant = require('imagemin-pngquant');
         return gulp.src(['src/img/**', '!src/img/**/*.psd', '!src/img/slice/**', '!src/img/slice/'])
             .pipe(plugins.imagemin({
                 progressive: true,
@@ -107,91 +203,93 @@ module.exports = function(gulp, plugins) {
             }))
             .pipe(gulp.dest('dest/img'))
     })
-    gulp.task('build_svgslice', function() {
-        function renameSvg(p){
-            p.basename = 'symbols'
-        }
-        return gulp.src('src/svg/slice/*.svg')
-            .pipe(plugins.svgSymbols({templates: ['default-svg']}))
-            .pipe(plugins.rename(renameSvg))
-            .pipe(gulp.dest('src/svg'))
-    })
-    gulp.task('build_svg', ['build_svgslice'], function() {
-        return gulp.src(['src/svg/**', '!src/svg/slice/**', '!src/svg/slice/'])
-            .pipe(gulp.dest('dest/svg'))
-    })
-    gulp.task('build_html', ['build_ejs'], function() {
-        // @see https://github.com/tarunc/gulp-jsbeautifier#default-options-from-js-beautify-can-be-used
+
+    // html任务
+    gulp.task('build_html', () => {
         if (isBeautifyHTML) {
             return gulp.src(['src/*.html'])
                 .pipe(plugins.jsbeautifier({indentSize: 4}))
+                .pipe(plugins.inlineSource().on('error', console.log))
+                .pipe(commonJS())
                 .pipe(gulp.dest('dest'))
         }
         return gulp.src(['src/*.html'])
+            .pipe(plugins.inlineSource().on('error', console.log))
+            .pipe(commonJS())
             .pipe(gulp.dest('dest'))
     })
-    gulp.task('build_ejs', function() {
-        return gulp.src('src/tpl/*.ejs')
-            .pipe(plugins.ejs().on('error', console.log))
-            .pipe(gulp.dest('src/'))
+
+    // clean 以往dest文件夹
+    gulp.task('build_clean', () => {
+        del.sync(['dest/**']);
     })
-    gulp.task('build_clean', function() {
-        del.sync(['dest/**'])
-    })
-    gulp.task('build_copyrest', function(){
+
+    // 复制文件
+    gulp.task('build_copyrest', () => {
         return gulp.src(['src/**', '!src/*.html'].concat(getIgnoreFolder()))
             .pipe(gulp.dest('dest/'))
-        function getIgnoreFolder(){
-            var paths = []
-            ;['css', 'img', 'js', 'sass', 'tpl', 'svg'].forEach(function(item){
-                paths.push('!src/'+item)
-                paths.push('!src/'+item+'/**')
+        function getIgnoreFolder () {
+            let paths = [];
+            ['css', 'img', 'js', 'sass', 'tpl', 'svg', 'entry', 'mp4', 'mp3', 'swf'].forEach((item) => {
+                paths.push('!src/' + item);
+                paths.push('!src/'+ item + '/**');
             })
-            return paths
+            return paths;
         }
     })
 
-    gulp.task('build', ['build_clean', 'build_html', 'build_sprite', 'build_js', 'build_img', 'build_copyrest'], function(){
-        browserSync({
-            ui:false,
-            server: {
-                baseDir: "dest",
-                directory: true
-            },
-            notify: false,
-            ghostMode:false,
-            codeSync: false,
-            port: that.port,
-            open: "external",
-            browser: "/Applications/Google\ Chrome.app/"
-        },function(err, arg){
-            if (argv.q) {
-                var url = arg.options.get('urls').get('external')
-                var qrcode = require('qrcode-terminal')
-                qrcode.generate(url)
+    // 少量代码的文件可以合并到页面上（不适用于包含背景图的css文件）
+    gulp.task('build_inline', ['build_html', 'build_sprite', 'build_js'], () => {
+        // 不压缩
+        var options = { compress : !1 };
+        // 去掉注释
+        options.handlers = (source, context, next) => {
+            source.fileContent = source.fileContent.replace(new RegExp('(/\\\*([^*]|[\\\r\\\n]|(\\\*+([^*/]|[\\\r\\\n])))*\\\*+/)|(//.*)'),'');
+            if (source.type == 'css') {
+                source.fileContent = source.fileContent.slice(0,-1) + ';' + source.fileContent.slice(-1);
             }
-        })
+            if (source.type == 'js') {
+                if (source.fileContent.charAt(0).match(/\s/)) {
+                    source.fileContent = source.fileContent.substring(1);
+                }
+            }
+            if (next) {
+                next();
+            }
+        };
+        return gulp.src(['dest/*.html'])
+            .pipe(plugins.inlineSource(options).on('error', console.log))
+            .pipe(gulp.dest('dest'))
     })
-    gulp.task('dest', function(){
+
+    // build 任务
+    gulp.task('build', ['build_clean', 'build_inline', 'build_img', 'build_copyrest'], () => {
         browserSync({
-            ui:false,
+            ui: false,
             server: {
-                baseDir: "dest",
-                directory: true
+                baseDir  : 'dest',
+                directory: true,
             },
-            notify: false,
+            notify   : false,
             ghostMode:false,
-            codeSync: false,
-            port: that.port,
-            open: "external",
-            browser: "/Applications/Google\ Chrome.app/"
-        },function(err, arg){
+            codeSync : false,
+            port     : port,
+            open     : 'external',
+            browser  : '/Applications/Google\ Chrome.app/'
+        }, (err, arg) => {
             if (argv.q) {
-                var url = arg.options.get('urls').get('external')
-                var qrcode = require('qrcode-terminal')
+                let url = arg.options.get('urls').get('external')
+                let qrcode = require('qrcode-terminal')
                 qrcode.generate(url)
             }
         })
     })
 
+    // 复制文件到cdn目录
+    gulp.task('build_cdn', () => {
+        if (config.cdn) {
+            return gulp.src(['dest/**', '!dest/*.*'])
+                    .pipe(gulp.dest(config.cdn))
+        }
+    })
 }
